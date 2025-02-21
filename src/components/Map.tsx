@@ -1,23 +1,58 @@
 import React, { useState } from "react";
-import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  useMap,
+  useMapEvents,
+} from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import axios from "axios";
 
-// デフォルトの位置（東京）
 const DEFAULT_POSITION = { lat: 35.6895, lng: 139.6917 };
 
-// マップの中心を変更するコンポーネント
+// マップの中心を変更するコンポーネント（ズームレベルを維持）
 const ChangeMapCenter: React.FC<{ position: { lat: number; lng: number } }> = ({
   position,
 }) => {
   const map = useMap();
-  map.setView(position, 13);
+  map.setView(position, map.getZoom()); // 現在のズームレベルを維持
+  return null;
+};
+
+// クリックでピンを立てるコンポーネント
+const ClickToAddPin: React.FC<{
+  onAddPin: (lat: number, lng: number) => void;
+}> = ({ onAddPin }) => {
+  let clickTimeout: NodeJS.Timeout | null = null;
+
+  useMapEvents({
+    click: (event) => {
+      if (clickTimeout) clearTimeout(clickTimeout);
+
+      clickTimeout = setTimeout(() => {
+        onAddPin(event.latlng.lat, event.latlng.lng);
+      }, 250); // 250ms 以内に dblclick が発生しなければピンを設置
+    },
+    dblclick: () => {
+      if (clickTimeout) clearTimeout(clickTimeout); // ダブルクリック時はピン設置をキャンセル
+    },
+  });
+
   return null;
 };
 
 const Map: React.FC = () => {
   const [position, setPosition] = useState(DEFAULT_POSITION);
   const [input, setInput] = useState("");
+  const [pins, setPins] = useState<
+    { lat: number; lng: number; note: string }[]
+  >([]);
+  const [searchResult, setSearchResult] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
 
   // 住所または郵便番号をジオコーディング
   const handleSearch = async () => {
@@ -32,12 +67,22 @@ const Map: React.FC = () => {
 
       if (response.data.length > 0) {
         const { lat, lon } = response.data[0];
-        setPosition({ lat: parseFloat(lat), lng: parseFloat(lon) });
+        const newPosition = { lat: parseFloat(lat), lng: parseFloat(lon) };
+        setPosition(newPosition);
+        setSearchResult(newPosition); // 検索結果を保存
       } else {
         alert("場所が見つかりませんでした");
       }
     } catch (error) {
       console.error("ジオコーディングエラー:", error);
+    }
+  };
+
+  // ピンの追加処理
+  const handleAddPin = (lat: number, lng: number) => {
+    const note = prompt("メモを入力してください:");
+    if (note !== null) {
+      setPins((prevPins) => [...prevPins, { lat, lng, note }]);
     }
   };
 
@@ -57,7 +102,7 @@ const Map: React.FC = () => {
 
       {/* 地図コンポーネント */}
       <MapContainer
-        center={position}
+        center={DEFAULT_POSITION} // 初期位置を固定
         zoom={13}
         style={{ height: "100%", width: "100%" }}
       >
@@ -65,8 +110,29 @@ const Map: React.FC = () => {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
-        <Marker position={position} />
+        {/* シングルクリックでピン設置 */}
+        <ClickToAddPin onAddPin={handleAddPin} />
+        {/* 検索時の地図移動（ズームレベル維持） */}
         <ChangeMapCenter position={position} />
+
+        {/* 検索結果のマーカー（クリックでピン追加） */}
+        {searchResult && (
+          <Marker
+            position={searchResult}
+            eventHandlers={{
+              click: () => handleAddPin(searchResult.lat, searchResult.lng),
+            }}
+          >
+            <Popup>検索結果（クリックでピン追加）</Popup>
+          </Marker>
+        )}
+
+        {/* 設置したピンを表示 */}
+        {pins.map((pin, index) => (
+          <Marker key={index} position={{ lat: pin.lat, lng: pin.lng }}>
+            <Popup>{pin.note}</Popup>
+          </Marker>
+        ))}
       </MapContainer>
     </div>
   );
